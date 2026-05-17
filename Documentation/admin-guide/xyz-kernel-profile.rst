@@ -77,6 +77,11 @@ The profile keeps multi-generation LRU and enables zswap by default.  Zswap
 uses ``lz4`` as its default compressor, which favors low CPU cost and quick
 swap-cache turnaround.
 
+DAMON reclaim and LRU sorting stay available for memory pressure experiments,
+but the separate DAMON statistics engine is not built by default.  The profile
+prefers memory-management mechanisms that can improve behavior over counters
+that are only useful while actively measuring a subsystem.
+
 Useful boot overrides:
 
 ``zswap.compressor=zstd``
@@ -114,10 +119,16 @@ without helping normal operation:
 * deprecated BSD process accounting;
 * task delay and task I/O accounting;
 * IRQ time accounting;
+* frequency, filesystem-cache, FIB trie, filesystem I/O, and DAMON statistic
+  collectors;
 * power-management debug tracing;
 * x86 change-page-attribute statistics;
 * shrinker and zsmalloc debug statistics;
 * scheduler statistics;
+* driver and firmware debug logging for common ACPI, wireless, storage, audio,
+  virtio, and network-filesystem paths;
+* synthetic test, error-injection, and extra runtime consistency checking
+  options that are better enabled in a dedicated validation build;
 * build-time x86 decoder selftests.
 
 Pressure stall information remains compiled in but disabled by default.  Boot
