@@ -18,6 +18,7 @@
 #endif
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("ACPI method call interface");
 
 /* Uncomment the following line to enable debug messages */
 /*
