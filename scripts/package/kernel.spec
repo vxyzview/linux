@@ -19,7 +19,7 @@
 # See https://github.com/rpm-software-management/rpm/blob/master/macros.in#L471
 %define _build_id_links none
 
-Name: kernel
+Name: %{kernel_package_name}
 Summary: The Linux Kernel
 Version: %(echo %{KERNELRELEASE} | sed -e 's/-/_/g')
 Release: %{pkg_release}
@@ -32,6 +32,8 @@ Source1: config
 Source2: diff.patch
 Provides: kernel-uname-r = %{version}
 Provides: kernel-%{KERNELRELEASE}
+Provides: %{name}-uname-r = %{version}
+Provides: %{name}-%{KERNELRELEASE}
 BuildRequires: bc binutils bison dwarves
 BuildRequires: (elfutils-devel or libdw-devel)
 BuildRequires: (elfutils-libelf-devel or libelf-devel) flex
@@ -57,7 +59,7 @@ glibc package.
 Summary: Development package for building kernel modules to match the %{version} kernel
 Group: System Environment/Kernel
 AutoReqProv: no
-%description -n kernel-devel
+%description devel
 This package provides kernel headers and makefiles sufficient to build modules
 against the %{version} kernel package.
 %endif

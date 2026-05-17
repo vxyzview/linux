@@ -1,0 +1,164 @@
+name: xyzkernel release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create or update. Defaults to xyzkernel-${run_number}."
+        required: false
+        type: string
+      make_jobs:
+        description: "Parallel make jobs per distro build. Full LTO can need a lot of RAM."
+        default: "2"
+        required: false
+        type: string
+  push:
+    tags:
+      - "xyzkernel-*"
+
+permissions:
+  contents: write
+
+env:
+  KERNEL_PACKAGE_NAME: xyzkernel
+  LLVM_VERSION: 22.1.5
+  MAKE_JOBS: ${{ github.event.inputs.make_jobs || '2' }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.format }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - format: debian
+            image: debian:trixie
+          - format: archlinux
+            image: archlinux:base-devel
+          - format: fedora
+            image: fedora:latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Free runner disk space
+        shell: bash
+        run: |
+          sudo rm -rf /opt/hostedtoolcache /usr/local/lib/android /usr/share/dotnet || true
+          docker system prune --all --force || true
+          df -h
+
+      - name: Build ${{ matrix.format }} package bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts/${{ matrix.format }} build/ci
+
+          docker run --rm \
+            --volume "${PWD}:/src" \
+            --workdir /src \
+            --env ARTIFACT_ROOT=/src/artifacts \
+            --env GITHUB_RUN_NUMBER="${GITHUB_RUN_NUMBER}" \
+            --env GITHUB_SHA="${GITHUB_SHA}" \
+            --env HOST_GID="$(id -g)" \
+            --env HOST_UID="$(id -u)" \
+            --env KERNEL_PACKAGE_NAME="${KERNEL_PACKAGE_NAME}" \
+            --env LLVM_VERSION="${LLVM_VERSION}" \
+            --env MAKE_JOBS="${MAKE_JOBS}" \
+            --env OUT_ROOT=/src/build/ci \
+            --env PACKAGE_FORMAT=${{ matrix.format }} \
+            ${{ matrix.image }} \
+            bash scripts/ci/build-xyzkernel-packages.sh
+
+      - name: Upload ${{ matrix.format }} bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: xyzkernel-${{ matrix.format }}
+          path: |
+            artifacts/${{ matrix.format }}/*.tar.zst
+            artifacts/${{ matrix.format }}/*.tar.zst.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Download package bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Resolve release tag
+        id: release
+        env:
+          REQUESTED_TAG: ${{ github.event.inputs.tag || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            tag="${GITHUB_REF_NAME}"
+          elif [ -n "${REQUESTED_TAG}" ]; then
+            tag="${REQUESTED_TAG}"
+          else
+            tag="xyzkernel-${GITHUB_RUN_NUMBER}"
+          fi
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          find release-assets -type f | sort
+          mapfile -t assets < <(find release-assets -type f \( -name '*.tar.zst' -o -name '*.tar.zst.sha256' \) | sort)
+
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release assets found" >&2
+            exit 1
+          fi
+
+          {
+            echo "xyzkernel ${RELEASE_TAG}"
+            echo
+            echo "Built from ${GITHUB_SHA} with LLVM ${LLVM_VERSION}."
+            echo
+            echo "Configuration:"
+            echo "- arch/x86/configs/xyz_defconfig"
+            echo "- LLVM=1 LLVM_IAS=1"
+            echo "- CONFIG_LTO_CLANG_FULL=y"
+            echo "- CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y"
+            echo
+            echo "Bundles:"
+            printf -- "- %s\n" "${assets[@]##*/}"
+          } > release-notes.md
+
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "xyzkernel ${RELEASE_TAG}" \
+              --notes-file release-notes.md \
+              --latest
+            gh release upload "${RELEASE_TAG}" "${assets[@]}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create "${RELEASE_TAG}" "${assets[@]}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "xyzkernel ${RELEASE_TAG}" \
+              --notes-file release-notes.md \
+              --latest
+          fi

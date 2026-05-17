@@ -12,6 +12,7 @@
 set -eu
 
 output=$1
+kernel_package_name=${KRPM_PACKAGE_NAME:-kernel}
 
 mkdir -p "$(dirname "${output}")"
 
@@ -69,6 +70,7 @@ cat<<EOF
 %define ARCH ${ARCH}
 %define KERNELRELEASE ${KERNELRELEASE}
 %define pkg_release $("${srctree}/scripts/build-version")
+%define kernel_package_name ${kernel_package_name}
 EOF
 
 cat "${srctree}/scripts/package/kernel.spec"

@@ -112,6 +112,9 @@ modules.order
 !.editorconfig
 !.get_maintainer.ignore
 !.gitattributes
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
 !.gitignore
 !.kunitconfig
 !.mailmap

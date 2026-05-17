@@ -167,10 +167,12 @@ fi
 sourcename=${KDEB_SOURCENAME:-linux-upstream}
 
 if [ "$ARCH" = "um" ] ; then
-	packagename=user-mode-linux
+	packagename=${KDEB_IMAGE_PACKAGE_NAME:-user-mode-linux}
 else
-	packagename=linux-image
+	packagename=${KDEB_IMAGE_PACKAGE_NAME:-linux-image}
 fi
+headers_packagename=${KDEB_HEADERS_PACKAGE_NAME:-linux-headers}
+libc_dev_packagename=${KDEB_LIBC_DEV_PACKAGE_NAME:-linux-libc-dev}
 
 debarch=
 set_debarch
@@ -225,7 +227,7 @@ EOF
 if [ "${SRCARCH}" != um ]; then
 cat <<EOF >> debian/control
 
-Package: linux-libc-dev
+Package: ${libc_dev_packagename}
 Section: devel
 Provides: linux-kernel-headers
 Architecture: $debarch
@@ -238,7 +240,7 @@ EOF
 if is_enabled CONFIG_MODULES; then
 cat <<EOF >> debian/control
 
-Package: linux-headers-${KERNELRELEASE}
+Package: ${headers_packagename}-${KERNELRELEASE}
 Architecture: $debarch
 Build-Profiles: <!pkg.${sourcename}.nokernelheaders>
 Description: Linux kernel headers for ${KERNELRELEASE} on $debarch
@@ -252,7 +254,7 @@ fi
 if is_enabled CONFIG_DEBUG_INFO; then
 cat <<EOF >> debian/control
 
-Package: linux-image-${KERNELRELEASE}-dbg
+Package: ${packagename}-${KERNELRELEASE}-dbg
 Section: debug
 Architecture: $debarch
 Build-Profiles: <!pkg.${sourcename}.nokerneldbg>
@@ -265,6 +267,9 @@ fi
 cat <<EOF > debian/rules.vars
 ARCH := ${ARCH}
 KERNELRELEASE := ${KERNELRELEASE}
+KDEB_IMAGE_PACKAGE_NAME := ${packagename}
+KDEB_HEADERS_PACKAGE_NAME := ${headers_packagename}
+KDEB_LIBC_DEV_PACKAGE_NAME := ${libc_dev_packagename}
 EOF
 
 cp "${srctree}/scripts/package/debian/copyright" debian/

@@ -26,13 +26,22 @@ if_enabled_echo() {
 	fi
 }
 
+if [ "${ARCH}" = um ] ; then
+	default_image_package_name=user-mode-linux
+else
+	default_image_package_name=linux-image
+fi
+deb_image_package_name=${KDEB_IMAGE_PACKAGE_NAME:-$default_image_package_name}
+deb_headers_package_name=${KDEB_HEADERS_PACKAGE_NAME:-linux-headers}
+deb_libc_dev_package_name=${KDEB_LIBC_DEV_PACKAGE_NAME:-linux-libc-dev}
+
 install_linux_image () {
 	pname=$1
 	pdir=debian/$1
 
 	# Only some architectures with OF support have this target
 	if is_enabled CONFIG_OF_EARLY_FLATTREE && [ -d "${srctree}/arch/${SRCARCH}/boot/dts" ]; then
-		${MAKE} -f ${srctree}/Makefile INSTALL_DTBS_PATH="${pdir}/usr/lib/linux-image-${KERNELRELEASE}" dtbs_install
+		${MAKE} -f ${srctree}/Makefile INSTALL_DTBS_PATH="${pdir}/usr/lib/${deb_image_package_name}-${KERNELRELEASE}" dtbs_install
 	fi
 
 	${MAKE} -f ${srctree}/Makefile INSTALL_MOD_PATH="${pdir}" INSTALL_MOD_STRIP=1 modules_install
@@ -137,12 +146,13 @@ install_linux_image_dbg () {
 
 install_kernel_headers () {
 	pdir=debian/$1
-	version=${1#linux-headers-}
+	version=${1#${deb_headers_package_name}-}
+	headerdir=/usr/src/${deb_headers_package_name}-${version}
 
-	CC="${DEB_HOST_GNU_TYPE}-gcc" "${srctree}/scripts/package/install-extmod-build" "${pdir}/usr/src/linux-headers-${version}"
+	CC="${DEB_HOST_GNU_TYPE}-gcc" "${srctree}/scripts/package/install-extmod-build" "${pdir}${headerdir}"
 
 	mkdir -p $pdir/lib/modules/$version/
-	ln -s /usr/src/linux-headers-$version $pdir/lib/modules/$version/build
+	ln -s ${headerdir} $pdir/lib/modules/$version/build
 }
 
 install_libc_headers () {
@@ -159,12 +169,12 @@ install_libc_headers () {
 package=$1
 
 case "${package}" in
-*-dbg)
+${deb_image_package_name}-${KERNELRELEASE}-dbg)
 	install_linux_image_dbg "${package}";;
-linux-image-*|user-mode-linux-*)
+${deb_image_package_name}-${KERNELRELEASE})
 	install_linux_image "${package}";;
-linux-libc-dev)
+${deb_libc_dev_package_name})
 	install_libc_headers "${package}";;
-linux-headers-*)
+${deb_headers_package_name}-${KERNELRELEASE})
 	install_kernel_headers "${package}";;
 esac
