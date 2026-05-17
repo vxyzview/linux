@@ -39,8 +39,9 @@ install_deps() {
 		apt-get install -y --no-install-recommends \
 			bc bison build-essential ca-certificates cpio curl debhelper \
 			diffutils dpkg-dev dwarves fakeroot file flex git kmod \
-			gcc-x86-64-linux-gnu libelf-dev libncurses6 libssl-dev libxml2 \
-			make openssl patch perl python3 rsync tar xz-utils zstd
+			gcc-x86-64-linux-gnu libdw-dev libelf-dev libncurses6 \
+			libssl-dev libxml2 make openssl patch perl python3 rsync tar \
+			xz-utils zstd
 	elif command -v pacman >/dev/null 2>&1; then
 		pacman -Syu --noconfirm --needed \
 			base-devel bc bison ca-certificates cpio curl diffutils \
