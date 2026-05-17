@@ -729,7 +729,7 @@ void elv_update_nr_hw_queues(struct request_queue *q,
 void elevator_set_default(struct request_queue *q)
 {
 	struct elv_change_ctx ctx = {
-		.name = "mq-deadline",
+		.name = "bfq",
 		.no_uevent = true,
 	};
 	int err;
@@ -741,8 +741,8 @@ void elevator_set_default(struct request_queue *q)
 		return;
 
 	/*
-	 * For single queue devices, default to using mq-deadline. If we
-	 * have multiple queues or mq-deadline is not available, default
+	 * For single queue devices, default to using bfq. If we
+	 * have multiple queues or bfq is not available, default
 	 * to "none".
 	 */
 	ctx.type = elevator_find_get(ctx.name);
