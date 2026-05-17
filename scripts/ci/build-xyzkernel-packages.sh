@@ -157,23 +157,28 @@ configure_kernel() {
 }
 
 copy_new_packages() {
-	local marker stage package_count
+	local marker stage package_count roots root
 	marker="$1"
 	stage="${ARTIFACT_DIR}/stage"
 	package_count=0
+	roots=("${PWD}" "${OUT_ROOT}")
 
 	rm -rf "${ARTIFACT_DIR}"
 	mkdir -p "${stage}"
 
-	while IFS= read -r -d '' pkg; do
-		cp -v "${pkg}" "${stage}/"
-		package_count=$((package_count + 1))
-	done < <(
-		find "${PWD}" -path "${PWD}/.git" -prune -o \
-			-type f -newer "${marker}" \
-			\( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' \) \
-			-print0
-	)
+	for root in "${roots[@]}"; do
+		[ -d "${root}" ] || continue
+
+		while IFS= read -r -d '' pkg; do
+			cp -v "${pkg}" "${stage}/"
+			package_count=$((package_count + 1))
+		done < <(
+			find "${root}" -path "${PWD}/.git" -prune -o \
+				-type f -newer "${marker}" \
+				\( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' \) \
+				-print0
+		)
+	done
 
 	if [ "${package_count}" -eq 0 ]; then
 		echo "No package artifacts were produced for ${PACKAGE_FORMAT}" >&2
