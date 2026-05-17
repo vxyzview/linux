@@ -45,8 +45,9 @@ install_deps() {
 	elif command -v pacman >/dev/null 2>&1; then
 		pacman -Syu --noconfirm --needed \
 			base-devel bc bison ca-certificates cpio curl diffutils \
-			file flex git kmod libelf libxml2 ncurses openssl pahole \
-			pacman-contrib patch perl python rsync tar xz zstd
+			file flex git kmod libelf libxml2 libxml2-legacy ncurses \
+			openssl pahole pacman-contrib patch perl python rsync tar xz \
+			zstd
 	elif command -v dnf >/dev/null 2>&1; then
 		dnf install -y \
 			bc binutils bison ca-certificates cpio curl diffutils dwarves \
