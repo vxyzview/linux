@@ -4,8 +4,12 @@
 # x86 Platform-Specific Drivers
 #
 
+# ACPI Calls
+
 # Windows Management Interface
 obj-$(CONFIG_WMI_BMOF)		+= wmi-bmof.o
+
+obj-$(CONFIG_ACPI_CALL)		+= acpi_call.o
 
 # WMI drivers
 obj-$(CONFIG_HUAWEI_WMI)		+= huawei-wmi.o
@@ -166,6 +170,8 @@ obj-$(CONFIG_WINMATE_FM07_KEYS)		+= winmate-fm07-keys.o
 
 # SEL
 obj-$(CONFIG_SEL3350_PLATFORM)		+= sel3350-platform.o
+
+obj-$(CONFIG_ZOTAC_ZONE_PLATFORM)	+= zotac-zone-platform.o
 
 # OneXPlayer
 obj-$(CONFIG_OXP_EC)			+= oxpec.o
