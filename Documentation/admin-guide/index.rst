@@ -19,6 +19,7 @@ etc.
 
    README
    devices
+   xyz-kernel-profile
 
    features
 
