@@ -12,6 +12,21 @@ Quick Start
 * Build the kernel: See Documentation/admin-guide/quickly-build-trimmed-linux.rst
 * Join the community: https://lore.kernel.org/
 
+xyzkernel Release Packages
+--------------------------
+
+The xyzkernel release workflow publishes native packages directly instead of
+wrapping them in an install-looking tarball.
+
+* Arch Linux: download both the `xyzkernel` and `xyzkernel-headers`
+  `*.pkg.tar.zst` files, then install them with `sudo pacman -U ./*.pkg.tar.zst`
+* Debian/Ubuntu: install the matching `*.deb` files with
+  `sudo apt install ./*.deb`
+* Fedora: install the matching `*.rpm` files with `sudo dnf install ./*.rpm`
+
+The plain `*-build-info.txt`, `*-SHA256SUMS.txt`, and `*.sha256` files are for
+verification and build details; they are not packages.
+
 Essential Documentation
 -----------------------
 

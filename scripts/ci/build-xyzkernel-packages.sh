@@ -157,23 +157,29 @@ configure_kernel() {
 }
 
 copy_new_packages() {
-	local marker stage package_count roots root
+	local marker release_dir package_count roots root prune_out_root
 	marker="$1"
-	stage="${ARTIFACT_DIR}/stage"
+	release_dir="${ARTIFACT_DIR}/release"
 	package_count=0
-	roots=("${PWD}" "${OUT_ROOT}")
+	roots=("${OUT_ROOT}" "${PWD}")
 
 	rm -rf "${ARTIFACT_DIR}"
-	mkdir -p "${stage}"
+	mkdir -p "${release_dir}"
 
 	for root in "${roots[@]}"; do
 		[ -d "${root}" ] || continue
+		prune_out_root=()
+		if [ "${root}" = "${PWD}" ] && [ "${OUT_ROOT}" != "${PWD}" ]; then
+			prune_out_root=(-path "${OUT_ROOT}" -prune -o)
+		fi
 
 		while IFS= read -r -d '' pkg; do
-			cp -v "${pkg}" "${stage}/"
+			cp -v "${pkg}" "${release_dir}/"
 			package_count=$((package_count + 1))
 		done < <(
 			find "${root}" -path "${PWD}/.git" -prune -o \
+				-path "${ARTIFACT_ROOT}" -prune -o \
+				"${prune_out_root[@]}" \
 				-type f -newer "${marker}" \
 				\( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' \) \
 				-print0
@@ -186,10 +192,12 @@ copy_new_packages() {
 	fi
 }
 
-write_metadata_and_bundle() {
-	local kernelrelease bundle
+write_release_metadata() {
+	local kernelrelease release_dir build_info checksum_manifest
 	kernelrelease="$1"
-	bundle="${ARTIFACT_DIR}/${KERNEL_PACKAGE_NAME}-${PACKAGE_FORMAT}-${kernelrelease}.tar.zst"
+	release_dir="${ARTIFACT_DIR}/release"
+	build_info="${release_dir}/${KERNEL_PACKAGE_NAME}-${PACKAGE_FORMAT}-${kernelrelease}-build-info.txt"
+	checksum_manifest="${release_dir}/${KERNEL_PACKAGE_NAME}-${PACKAGE_FORMAT}-${kernelrelease}-SHA256SUMS.txt"
 
 	{
 		echo "package_name=${KERNEL_PACKAGE_NAME}"
@@ -204,17 +212,23 @@ write_metadata_and_bundle() {
 		make_kernel -s kernelversion
 		echo
 		grep -E '^(CONFIG_CC_IS_CLANG|CONFIG_LD_IS_LLD|CONFIG_AS_IS_LLVM|CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3|CONFIG_LTO_CLANG_FULL)=' "${OUT_DIR}/.config"
-	} > "${ARTIFACT_DIR}/stage/build-info.txt"
+	} > "${build_info}"
 
 	(
-		cd "${ARTIFACT_DIR}/stage"
-		sha256sum * > SHA256SUMS
-	)
+		cd "${release_dir}"
+		rm -f ./*.sha256 "${checksum_manifest##*/}"
 
-	tar -I zstd -cf "${bundle}" -C "${ARTIFACT_DIR}/stage" .
-	(
-		cd "${ARTIFACT_DIR}"
-		sha256sum "$(basename "${bundle}")" > "$(basename "${bundle}").sha256"
+		mapfile -t checksum_files < <(
+			find . -maxdepth 1 -type f \
+				! -name '*.sha256' \
+				! -name '*-SHA256SUMS.txt' \
+				-printf '%P\n' | LC_ALL=C sort
+		)
+
+		sha256sum "${checksum_files[@]}" > "${checksum_manifest##*/}"
+		for file in "${checksum_files[@]}"; do
+			sha256sum "${file}" > "${file}.sha256"
+		done
 	)
 }
 
@@ -239,7 +253,7 @@ build_package() {
 		;;
 	archlinux)
 		export PACMAN_PKGBASE="${PACMAN_PKGBASE:-${KERNEL_PACKAGE_NAME}}"
-		export PACMAN_EXTRAPACKAGES="${PACMAN_EXTRAPACKAGES:-headers api-headers}"
+		export PACMAN_EXTRAPACKAGES="${PACMAN_EXTRAPACKAGES:-headers}"
 		export MAKEPKGOPTS="${MAKEPKGOPTS:---noconfirm --syncdeps --needed --skippgpcheck --nocheck}"
 		kernelrelease="$(make_kernel -s kernelrelease)"
 		make_kernel -j"${MAKE_JOBS}" pacman-pkg
@@ -253,7 +267,7 @@ build_package() {
 	esac
 
 	copy_new_packages "${marker}"
-	write_metadata_and_bundle "${kernelrelease}"
+	write_release_metadata "${kernelrelease}"
 }
 
 main() {

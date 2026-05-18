@@ -50,7 +50,7 @@ jobs:
           docker system prune --all --force || true
           df -h
 
-      - name: Build ${{ matrix.format }} package bundle
+      - name: Build ${{ matrix.format }} packages
         shell: bash
         run: |
           set -euo pipefail
@@ -73,13 +73,12 @@ jobs:
             ${{ matrix.image }} \
             bash scripts/ci/build-xyzkernel-packages.sh
 
-      - name: Upload ${{ matrix.format }} bundle
+      - name: Upload ${{ matrix.format }} packages
         uses: actions/upload-artifact@v4
         with:
           name: xyzkernel-${{ matrix.format }}
           path: |
-            artifacts/${{ matrix.format }}/*.tar.zst
-            artifacts/${{ matrix.format }}/*.tar.zst.sha256
+            artifacts/${{ matrix.format }}/release/*
           if-no-files-found: error
           retention-days: 14
 
@@ -89,7 +88,7 @@ jobs:
     needs: build
 
     steps:
-      - name: Download package bundles
+      - name: Download package artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
@@ -121,26 +120,106 @@ jobs:
           set -euo pipefail
 
           find release-assets -type f | sort
-          mapfile -t assets < <(find release-assets -type f \( -name '*.tar.zst' -o -name '*.tar.zst.sha256' \) | sort)
+          mapfile -t assets < <(find release-assets -type f | sort)
 
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "No release assets found" >&2
             exit 1
           fi
 
+          mapfile -t arch_packages < <(find release-assets -type f -name '*.pkg.tar.*' ! -name '*.sha256' ! -name '*.sig' -printf '%f\n' | sort)
+          mapfile -t debian_packages < <(find release-assets -type f -name '*.deb' -printf '%f\n' | sort)
+          mapfile -t fedora_packages < <(find release-assets -type f -name '*.rpm' -printf '%f\n' | sort)
+          mapfile -t build_info < <(find release-assets -type f -name '*-build-info.txt' -printf '%f\n' | sort)
+          kernelrelease="$(find release-assets -type f -name '*-build-info.txt' -print -quit | xargs -r sed -n 's/^kernelrelease=//p' | head -n1)"
+
+          print_list() {
+            local item
+            for item in "$@"; do
+              printf -- "- `%s`\n" "${item}"
+            done
+          }
+
+          print_install_command() {
+            local installer="$1"
+            shift
+
+            [ "$#" -gt 0 ] || return 0
+
+            echo '```bash'
+            if [ "$#" -eq 1 ]; then
+              printf '%s ./%s\n' "${installer}" "$1"
+            else
+              printf '%s \\\n' "${installer}"
+              while [ "$#" -gt 0 ]; do
+                if [ "$#" -eq 1 ]; then
+                  printf '  ./%s\n' "$1"
+                else
+                  printf '  ./%s \\\n' "$1"
+                fi
+                shift
+              done
+            fi
+            echo '```'
+          }
+
           {
-            echo "xyzkernel ${RELEASE_TAG}"
+            echo "# xyzkernel ${RELEASE_TAG}"
             echo
-            echo "Built from ${GITHUB_SHA} with LLVM ${LLVM_VERSION}."
+            echo "Native Linux packages built from \`${GITHUB_SHA}\` with LLVM \`${LLVM_VERSION}\`."
+            [ -z "${kernelrelease}" ] || echo "Kernel release: \`${kernelrelease}\`."
             echo
-            echo "Configuration:"
-            echo "- arch/x86/configs/xyz_defconfig"
-            echo "- LLVM=1 LLVM_IAS=1"
-            echo "- CONFIG_LTO_CLANG_FULL=y"
-            echo "- CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y"
+            echo "## Install"
             echo
-            echo "Bundles:"
-            printf -- "- %s\n" "${assets[@]##*/}"
+            echo "Download the package files for your distro, then install the matching set together."
+            echo
+            if [ "${#arch_packages[@]}" -gt 0 ]; then
+              echo "### Arch Linux"
+              print_install_command "sudo pacman -U" "${arch_packages[@]}"
+              echo
+            fi
+            if [ "${#debian_packages[@]}" -gt 0 ]; then
+              echo "### Debian / Ubuntu"
+              print_install_command "sudo apt install" "${debian_packages[@]}"
+              echo
+            fi
+            if [ "${#fedora_packages[@]}" -gt 0 ]; then
+              echo "### Fedora"
+              print_install_command "sudo dnf install" "${fedora_packages[@]}"
+              echo
+            fi
+            echo "## Build"
+            echo
+            echo "- Config: \`arch/x86/configs/xyz_defconfig\`"
+            echo "- Toolchain: \`LLVM=1 LLVM_IAS=1\`"
+            echo "- Optimization: \`CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y\`"
+            echo "- LTO: \`CONFIG_LTO_CLANG_FULL=y\`"
+            echo
+            echo "## Packages"
+            echo
+            if [ "${#arch_packages[@]}" -gt 0 ]; then
+              echo "### Arch Linux"
+              print_list "${arch_packages[@]}"
+              echo
+            fi
+            if [ "${#debian_packages[@]}" -gt 0 ]; then
+              echo "### Debian / Ubuntu"
+              print_list "${debian_packages[@]}"
+              echo
+            fi
+            if [ "${#fedora_packages[@]}" -gt 0 ]; then
+              echo "### Fedora"
+              print_list "${fedora_packages[@]}"
+              echo
+            fi
+            echo "## Verification"
+            echo
+            echo "Each package has a \`.sha256\` sidecar, and every distro build also includes a checksum manifest plus build info."
+            if [ "${#build_info[@]}" -gt 0 ]; then
+              echo
+              echo "Build info files:"
+              print_list "${build_info[@]}"
+            fi
           } > release-notes.md
 
           if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
