@@ -44,6 +44,12 @@ ccflags-y := -I$(FULL_AMD_PATH)/include/asic_reg \
 subdir-ccflags-y += -Wno-override-init
 subdir-ccflags-$(CONFIG_DRM_AMDGPU_WERROR) += -Werror
 
+ifdef CONFIG_LTO_CLANG
+# Keep this monolithic module inside constrained builder limits.
+ccflags-remove-y += $(CC_FLAGS_LTO)
+LDFLAGS_amdgpu.o += --threads=1
+endif
+
 amdgpu-y := amdgpu_drv.o
 
 # add KMS driver
