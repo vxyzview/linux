@@ -93,6 +93,8 @@ jobs:
             image: archlinux:base-devel
           - format: fedora
             image: fedora:latest
+          - format: voidlinux
+            image: ghcr.io/void-linux/void-glibc-full:latest
 
     steps:
       - name: Check out source
@@ -197,6 +199,7 @@ jobs:
                   *.pkg.tar.*) suffix=".pkg.tar.${base##*.}" ;;
                   *.deb) suffix=".deb" ;;
                   *.rpm) suffix=".rpm" ;;
+                  *.xbps) suffix=".xbps" ;;
                   *) continue ;;
                 esac
 
@@ -209,7 +212,7 @@ jobs:
                 fi
               done < <(
                 find "${distro_dir}" -maxdepth 1 -type f \
-                  \( -name '*.pkg.tar.*' -o -name '*.deb' -o -name '*.rpm' \) \
+                  \( -name '*.pkg.tar.*' -o -name '*.deb' -o -name '*.rpm' -o -name '*.xbps' \) \
                   ! -name '*.sha256' \
                   ! -name '*.sig' \
                   -print0
@@ -254,6 +257,7 @@ jobs:
           mapfile -t arch_packages < <(find release-assets -type f -name '*.pkg.tar.*' ! -name '*.sha256' ! -name '*.sig' -printf '%f\n' | sort)
           mapfile -t debian_packages < <(find release-assets -type f -name '*.deb' -printf '%f\n' | sort)
           mapfile -t fedora_packages < <(find release-assets -type f -name '*.rpm' -printf '%f\n' | sort)
+          mapfile -t void_packages < <(find release-assets -type f -name '*.xbps' ! -name '*.sha256' -printf '%f\n' | sort)
           mapfile -t build_info < <(find release-assets -type f -name '*-build-info.txt' -printf '%f\n' | sort)
           mapfile -t checksum_manifests < <(find release-assets -type f -name '*-SHA256SUMS.txt' -printf '%f\n' | sort)
           kernelrelease="$(find release-assets -type f -name '*-build-info.txt' -print -quit | xargs -r sed -n 's/^kernelrelease=//p' | head -n1)"
@@ -327,6 +331,47 @@ jobs:
             echo '```'
           }
 
+          print_void_install_command() {
+            local item pkg
+            local -a main_packages=()
+            local -a extra_packages=()
+            local -a packages=()
+
+            [ "$#" -gt 0 ] || return 0
+
+            for item in "$@"; do
+              case "${item}" in
+                *-v${RELEASE_VERSION}.xbps)
+                  pkg="${item%-v${RELEASE_VERSION}.xbps}"
+                  ;;
+                *-v${RELEASE_VERSION}-*.xbps)
+                  pkg="${item%%-v${RELEASE_VERSION}-*}"
+                  ;;
+                *)
+                  continue
+                  ;;
+              esac
+              if [ "${pkg}" = "${KERNEL_PACKAGE_NAME}" ]; then
+                main_packages+=("${pkg}")
+              else
+                extra_packages+=("${pkg}")
+              fi
+            done
+
+            packages=("${main_packages[@]}" "${extra_packages[@]}")
+
+            [ "${#packages[@]}" -gt 0 ] || return 0
+
+            echo '```bash'
+            echo 'xbps-rindex -a ./*.xbps'
+            printf 'sudo xbps-install -R "$PWD"'
+            for pkg in "${packages[@]}"; do
+              printf ' %s' "${pkg}"
+            done
+            echo
+            echo '```'
+          }
+
           {
             echo "# xyzkernel-v${RELEASE_VERSION}"
             echo
@@ -350,6 +395,7 @@ jobs:
             printf '| Arch Linux | %d | `%s` |\n' "${#arch_packages[@]}" "sudo pacman -U"
             printf '| Debian / Ubuntu | %d | `%s` |\n' "${#debian_packages[@]}" "sudo apt install"
             printf '| Fedora | %d | `%s` |\n' "${#fedora_packages[@]}" "sudo dnf install"
+            printf '| Void Linux | %d | `%s` |\n' "${#void_packages[@]}" "xbps-install -R"
             echo
             echo "## Quick Install"
             echo
@@ -373,6 +419,12 @@ jobs:
               print_install_command "sudo dnf install" "${fedora_packages[@]}"
               echo
             fi
+            if [ "${#void_packages[@]}" -gt 0 ]; then
+              echo "### Void Linux"
+              echo
+              print_void_install_command "${void_packages[@]}"
+              echo
+            fi
             echo "## Build Recipe"
             echo
             echo "- Config: \`arch/x86/configs/xyz_defconfig\`"
@@ -385,6 +437,7 @@ jobs:
             print_asset_table "Arch Linux" "${arch_packages[@]}"
             print_asset_table "Debian / Ubuntu" "${debian_packages[@]}"
             print_asset_table "Fedora" "${fedora_packages[@]}"
+            print_asset_table "Void Linux" "${void_packages[@]}"
             if [ "${#build_info[@]}" -gt 0 ] || [ "${#checksum_manifests[@]}" -gt 0 ]; then
               echo "### Build Metadata"
               echo

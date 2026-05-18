@@ -30,6 +30,8 @@ for example `xyzkernel-v1.2.3`, `xyzkernel-headers-v1.2.3`, and
 * Debian/Ubuntu: install the matching `*.deb` files with
   `sudo apt install ./*.deb`
 * Fedora: install the matching `*.rpm` files with `sudo dnf install ./*.rpm`
+* Void Linux: index the matching `*.xbps` files with `xbps-rindex -a ./*.xbps`,
+  then install them with `sudo xbps-install -R "$PWD" xyzkernel xyzkernel-headers`
 
 The plain `*-build-info.txt`, `*-SHA256SUMS.txt`, and `*.sha256` files are for
 verification and build details; they are not packages.
