@@ -129,7 +129,14 @@ jobs:
             --env PACKAGE_FORMAT=${{ matrix.format }} \
             --env XYZKERNEL_RELEASE_VERSION="${XYZKERNEL_RELEASE_VERSION}" \
             ${{ matrix.image }} \
-            bash scripts/ci/build-xyzkernel-packages.sh
+            /bin/sh -ec '
+              if [ "${PACKAGE_FORMAT}" = voidlinux ] && ! command -v bash >/dev/null 2>&1; then
+                xbps-install -Syu -y xbps
+                xbps-install -y bash
+              fi
+
+              exec bash scripts/ci/build-xyzkernel-packages.sh
+            '
 
       - name: Upload ${{ matrix.format }} packages
         uses: actions/upload-artifact@v4

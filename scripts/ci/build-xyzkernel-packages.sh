@@ -59,7 +59,7 @@ install_deps() {
 	elif command -v xbps-install >/dev/null 2>&1; then
 		xbps-install -Syu -y xbps
 		xbps-install -y \
-			base-devel bc binutils bison ca-certificates cpio curl \
+			base-devel bash bc binutils bison ca-certificates cpio curl \
 			diffutils elfutils-devel file flex git kmod libxml2-devel \
 			ncurses-devel openssl-devel pahole patch perl python3 rsync \
 			tar xbps xz zstd
