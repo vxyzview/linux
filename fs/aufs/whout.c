@@ -441,7 +441,7 @@ out:
  */
 int au_wh_init(struct au_branch *br, struct super_block *sb)
 {
-	int err, i, need_drop;
+	int err, i, need_drop = 0;
 	const unsigned char do_plink
 		= !!au_opt_test(au_mntflags(sb), PLINK);
 	struct inode *h_dir;
@@ -495,7 +495,6 @@ int au_wh_init(struct au_branch *br, struct super_block *sb)
 			wbr->wbr_wh[i] = NULL;
 		}
 
-	need_drop = 0;
 	err = vfsub_mnt_want_write(path.mnt);
 	if (unlikely(err))
 		goto out_err;

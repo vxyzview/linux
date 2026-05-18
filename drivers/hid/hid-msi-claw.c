@@ -201,8 +201,8 @@ static int msi_claw_raw_event_control(struct hid_device *hdev, struct msi_claw_d
 {
 	struct msi_claw_read_data **list = NULL;
 	struct msi_claw_read_data *node = NULL;
-	uint8_t *buffer;
-	int ret, i;
+	uint8_t *buffer = NULL;
+	int ret = -EINVAL, i;
 
 	if (size != MSI_CLAW_READ_SIZE) {
 		//hid_err(hdev, "hid-msi-claw got unknown %d bytes\n", size);
