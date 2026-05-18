@@ -18,6 +18,13 @@ xyzkernel Release Packages
 The xyzkernel release workflow publishes native packages directly instead of
 wrapping them in an install-looking tarball.
 
+To publish a release from GitHub, open Actions, run the "xyzkernel release"
+workflow, and enter a semantic version such as `1.2.3` or `1.2.3-rc.1`. The
+workflow validates the version before building and publishes the release as
+`xyzkernel-v<version>`. Release asset filenames use the same version style,
+for example `xyzkernel-v1.2.3`, `xyzkernel-headers-v1.2.3`, and
+`xyzkernel-devel-v1.2.3`.
+
 * Arch Linux: download both the `xyzkernel` and `xyzkernel-headers`
   `*.pkg.tar.zst` files, then install them with `sudo pacman -U ./*.pkg.tar.zst`
 * Debian/Ubuntu: install the matching `*.deb` files with

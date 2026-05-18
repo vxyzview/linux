@@ -10,6 +10,7 @@ LLVM_ARCHIVE="${LLVM_ARCHIVE:-LLVM-${LLVM_VERSION}-Linux-X64.tar.xz}"
 LLVM_BASE_URL="${LLVM_BASE_URL:-https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}}"
 LLVM_URL="${LLVM_URL:-${LLVM_BASE_URL}/${LLVM_ARCHIVE}}"
 MAKE_JOBS="${MAKE_JOBS:-$(nproc)}"
+XYZKERNEL_RELEASE_VERSION="${XYZKERNEL_RELEASE_VERSION:-unknown}"
 OUT_ROOT="${OUT_ROOT:-${PWD}/build/ci}"
 OUT_DIR="${OUT_DIR:-${OUT_ROOT}/${PACKAGE_FORMAT}}"
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-${PWD}/artifacts}"
@@ -101,6 +102,7 @@ rerun_arch_build_as_user() {
 		OUT_DIR="${OUT_DIR}" \
 		OUT_ROOT="${OUT_ROOT}" \
 		PACKAGE_FORMAT="${PACKAGE_FORMAT}" \
+		XYZKERNEL_RELEASE_VERSION="${XYZKERNEL_RELEASE_VERSION}" \
 		XYZKERNEL_BUILDER_USER=1 \
 		XYZKERNEL_SKIP_DEPS=1 \
 		bash "$0"
@@ -202,6 +204,7 @@ write_release_metadata() {
 	{
 		echo "package_name=${KERNEL_PACKAGE_NAME}"
 		echo "package_format=${PACKAGE_FORMAT}"
+		echo "release_version=${XYZKERNEL_RELEASE_VERSION}"
 		echo "kernelrelease=${kernelrelease}"
 		echo "llvm_version=${LLVM_VERSION}"
 		echo "make_jobs=${MAKE_JOBS}"

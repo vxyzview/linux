@@ -3,9 +3,9 @@ name: xyzkernel release
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag to create or update. Defaults to xyzkernel-${run_number}."
-        required: false
+      version:
+        description: "Semantic version to release, such as 1.2.3 or 1.2.3-rc.1. Creates xyzkernel-v<version>."
+        required: true
         type: string
       make_jobs:
         description: "Parallel make jobs per distro build. Full LTO can need a lot of RAM."
@@ -14,7 +14,7 @@ on:
         type: string
   push:
     tags:
-      - "xyzkernel-*"
+      - "xyzkernel-v[0-9]*.[0-9]*.[0-9]*"
 
 permissions:
   contents: write
@@ -25,9 +25,64 @@ env:
   MAKE_JOBS: ${{ github.event.inputs.make_jobs || '2' }}
 
 jobs:
+  release_context:
+    name: Prepare release
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      title: ${{ steps.release.outputs.title }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+
+    steps:
+      - name: Validate semantic version
+        id: release
+        env:
+          REQUESTED_VERSION: ${{ github.event.inputs.version || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?(\+([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
+
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#xyzkernel-v}"
+            if [ "${version}" = "${tag}" ]; then
+              echo "::error title=Invalid release tag::Push tags must use xyzkernel-v<semver>, for example xyzkernel-v1.2.3."
+              exit 1
+            fi
+          else
+            version="${REQUESTED_VERSION#v}"
+            tag="xyzkernel-v${version}"
+          fi
+
+          if [[ ! "${version}" =~ ${semver_re} ]]; then
+            echo "::error title=Invalid semantic version::Use MAJOR.MINOR.PATCH, for example 1.2.3, 1.2.3-rc.1, or 1.2.3+build.5. Do not include the xyzkernel-v prefix."
+            exit 1
+          fi
+
+          prerelease=false
+          if [[ "${version}" == *-* ]]; then
+            prerelease=true
+          fi
+
+          {
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "title=xyzkernel-v${version}"
+            echo "prerelease=${prerelease}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Release version: ${version}"
+          echo "Release tag: ${tag}"
+
   build:
     name: Build ${{ matrix.format }}
     runs-on: ubuntu-24.04
+    needs: release_context
+    env:
+      XYZKERNEL_RELEASE_VERSION: ${{ needs.release_context.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +125,7 @@ jobs:
             --env MAKE_JOBS="${MAKE_JOBS}" \
             --env OUT_ROOT=/src/build/ci \
             --env PACKAGE_FORMAT=${{ matrix.format }} \
+            --env XYZKERNEL_RELEASE_VERSION="${XYZKERNEL_RELEASE_VERSION}" \
             ${{ matrix.image }} \
             bash scripts/ci/build-xyzkernel-packages.sh
 
@@ -85,39 +141,107 @@ jobs:
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-24.04
-    needs: build
+    needs:
+      - release_context
+      - build
 
     steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download package artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
 
-      - name: Resolve release tag
-        id: release
-        env:
-          REQUESTED_TAG: ${{ github.event.inputs.tag || '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then
-            tag="${GITHUB_REF_NAME}"
-          elif [ -n "${REQUESTED_TAG}" ]; then
-            tag="${REQUESTED_TAG}"
-          else
-            tag="xyzkernel-${GITHUB_RUN_NUMBER}"
-          fi
-
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
-
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_IS_PRERELEASE: ${{ needs.release_context.outputs.prerelease }}
+          RELEASE_TAG: ${{ needs.release_context.outputs.tag }}
+          RELEASE_TITLE: ${{ needs.release_context.outputs.title }}
+          RELEASE_VERSION: ${{ needs.release_context.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+
+          normalize_release_asset_names() {
+            local distro_dir format file base lower component suffix target
+
+            while IFS= read -r -d '' distro_dir; do
+              format="${distro_dir##*/}"
+              format="${format#xyzkernel-}"
+
+              find "${distro_dir}" -maxdepth 1 -type f \
+                \( -name '*.sha256' -o -name '*-SHA256SUMS.txt' \) \
+                -delete
+
+              while IFS= read -r -d '' file; do
+                base="${file##*/}"
+                lower="${base,,}"
+                component="${KERNEL_PACKAGE_NAME}"
+                suffix=""
+
+                case "${lower}" in
+                  *libc*) component="${KERNEL_PACKAGE_NAME}-libc" ;;
+                  *headers*|*header*) component="${KERNEL_PACKAGE_NAME}-headers" ;;
+                  *devel*) component="${KERNEL_PACKAGE_NAME}-devel" ;;
+                  *-dev_*|*_dev_*|*-dev-*|*_dev-*) component="${KERNEL_PACKAGE_NAME}-devel" ;;
+                  *debug*|*dbg*) component="${KERNEL_PACKAGE_NAME}-debug" ;;
+                  *tools*) component="${KERNEL_PACKAGE_NAME}-tools" ;;
+                esac
+
+                case "${base}" in
+                  *.pkg.tar.*) suffix=".pkg.tar.${base##*.}" ;;
+                  *.deb) suffix=".deb" ;;
+                  *.rpm) suffix=".rpm" ;;
+                  *) continue ;;
+                esac
+
+                target="${distro_dir}/${component}-v${RELEASE_VERSION}${suffix}"
+                if [ "${file}" != "${target}" ]; then
+                  if [ -e "${target}" ]; then
+                    target="${distro_dir}/${component}-v${RELEASE_VERSION}-${format}${suffix}"
+                  fi
+                  mv -v "${file}" "${target}"
+                fi
+              done < <(
+                find "${distro_dir}" -maxdepth 1 -type f \
+                  \( -name '*.pkg.tar.*' -o -name '*.deb' -o -name '*.rpm' \) \
+                  ! -name '*.sha256' \
+                  ! -name '*.sig' \
+                  -print0
+              )
+
+              while IFS= read -r -d '' file; do
+                target="${distro_dir}/${KERNEL_PACKAGE_NAME}-v${RELEASE_VERSION}-${format}-build-info.txt"
+                if [ "${file}" != "${target}" ]; then
+                  mv -v "${file}" "${target}"
+                fi
+              done < <(find "${distro_dir}" -maxdepth 1 -type f -name '*-build-info.txt' -print0)
+
+              (
+                cd "${distro_dir}"
+                mapfile -t checksum_files < <(
+                  find . -maxdepth 1 -type f \
+                    ! -name '*.sha256' \
+                    ! -name '*-SHA256SUMS.txt' \
+                    -printf '%P\n' | LC_ALL=C sort
+                )
+
+                if [ "${#checksum_files[@]}" -gt 0 ]; then
+                  sha256sum "${checksum_files[@]}" > "${KERNEL_PACKAGE_NAME}-v${RELEASE_VERSION}-${format}-SHA256SUMS.txt"
+                  for file in "${checksum_files[@]}"; do
+                    sha256sum "${file}" > "${file}.sha256"
+                  done
+                fi
+              )
+            done < <(find release-assets -mindepth 1 -maxdepth 1 -type d -print0)
+          }
+
+          normalize_release_asset_names
 
           find release-assets -type f | sort
           mapfile -t assets < <(find release-assets -type f | sort)
@@ -131,13 +255,53 @@ jobs:
           mapfile -t debian_packages < <(find release-assets -type f -name '*.deb' -printf '%f\n' | sort)
           mapfile -t fedora_packages < <(find release-assets -type f -name '*.rpm' -printf '%f\n' | sort)
           mapfile -t build_info < <(find release-assets -type f -name '*-build-info.txt' -printf '%f\n' | sort)
+          mapfile -t checksum_manifests < <(find release-assets -type f -name '*-SHA256SUMS.txt' -printf '%f\n' | sort)
           kernelrelease="$(find release-assets -type f -name '*-build-info.txt' -print -quit | xargs -r sed -n 's/^kernelrelease=//p' | head -n1)"
+          generated_at="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          previous_tag="$(git describe --tags --match 'xyzkernel-v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          if [ -z "${previous_tag}" ]; then
+            mapfile -t release_tags < <(git tag --list 'xyzkernel-v*' --sort=-v:refname)
+            for candidate in "${release_tags[@]}"; do
+              if [ "${candidate}" != "${RELEASE_TAG}" ]; then
+                previous_tag="${candidate}"
+                break
+              fi
+            done
+          fi
+
+          change_heading="Recent source changes"
+          total_changes=0
+          if [ -n "${previous_tag}" ]; then
+            change_heading="Source changes since ${previous_tag}"
+            total_changes="$(git rev-list --count "${previous_tag}..${GITHUB_SHA}")"
+            mapfile -t change_lines < <(git log -n 15 --no-merges --format='- `%h` %s' "${previous_tag}..${GITHUB_SHA}")
+          else
+            mapfile -t change_lines < <(git log -n 15 --no-merges --format='- `%h` %s' "${GITHUB_SHA}")
+          fi
 
           print_list() {
             local item
             for item in "$@"; do
-              printf -- "- `%s`\n" "${item}"
+              printf -- '- `%s`\n' "${item}"
             done
+          }
+
+          print_asset_table() {
+            local heading="$1"
+            shift
+
+            [ "$#" -gt 0 ] || return 0
+
+            echo "### ${heading}"
+            echo
+            echo "| File |"
+            echo "| --- |"
+            local item
+            for item in "$@"; do
+              printf '| `%s` |\n' "${item}"
+            done
+            echo
           }
 
           print_install_command() {
@@ -164,70 +328,112 @@ jobs:
           }
 
           {
-            echo "# xyzkernel ${RELEASE_TAG}"
+            echo "# xyzkernel-v${RELEASE_VERSION}"
             echo
-            echo "Native Linux packages built from \`${GITHUB_SHA}\` with LLVM \`${LLVM_VERSION}\`."
-            [ -z "${kernelrelease}" ] || echo "Kernel release: \`${kernelrelease}\`."
+            echo "Native Linux packages for xyzkernel, built by GitHub Actions from \`${GITHUB_SHA}\` with LLVM \`${LLVM_VERSION}\`."
             echo
-            echo "## Install"
+            echo "## Release Details"
+            echo
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| Version | \`${RELEASE_VERSION}\` |"
+            echo "| Tag | \`${RELEASE_TAG}\` |"
+            echo "| Source commit | \`${GITHUB_SHA}\` |"
+            [ -z "${kernelrelease}" ] || echo "| Kernel release | \`${kernelrelease}\` |"
+            echo "| LLVM | \`${LLVM_VERSION}\` |"
+            echo "| Generated | ${generated_at} |"
+            echo
+            echo "## Package Summary"
+            echo
+            echo "| Distro | Package files | Installer |"
+            echo "| --- | ---: | --- |"
+            printf '| Arch Linux | %d | `%s` |\n' "${#arch_packages[@]}" "sudo pacman -U"
+            printf '| Debian / Ubuntu | %d | `%s` |\n' "${#debian_packages[@]}" "sudo apt install"
+            printf '| Fedora | %d | `%s` |\n' "${#fedora_packages[@]}" "sudo dnf install"
+            echo
+            echo "## Quick Install"
             echo
             echo "Download the package files for your distro, then install the matching set together."
             echo
             if [ "${#arch_packages[@]}" -gt 0 ]; then
               echo "### Arch Linux"
+              echo
               print_install_command "sudo pacman -U" "${arch_packages[@]}"
               echo
             fi
             if [ "${#debian_packages[@]}" -gt 0 ]; then
               echo "### Debian / Ubuntu"
+              echo
               print_install_command "sudo apt install" "${debian_packages[@]}"
               echo
             fi
             if [ "${#fedora_packages[@]}" -gt 0 ]; then
               echo "### Fedora"
+              echo
               print_install_command "sudo dnf install" "${fedora_packages[@]}"
               echo
             fi
-            echo "## Build"
+            echo "## Build Recipe"
             echo
             echo "- Config: \`arch/x86/configs/xyz_defconfig\`"
             echo "- Toolchain: \`LLVM=1 LLVM_IAS=1\`"
             echo "- Optimization: \`CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y\`"
             echo "- LTO: \`CONFIG_LTO_CLANG_FULL=y\`"
             echo
-            echo "## Packages"
+            echo "## Assets"
             echo
-            if [ "${#arch_packages[@]}" -gt 0 ]; then
-              echo "### Arch Linux"
-              print_list "${arch_packages[@]}"
+            print_asset_table "Arch Linux" "${arch_packages[@]}"
+            print_asset_table "Debian / Ubuntu" "${debian_packages[@]}"
+            print_asset_table "Fedora" "${fedora_packages[@]}"
+            if [ "${#build_info[@]}" -gt 0 ] || [ "${#checksum_manifests[@]}" -gt 0 ]; then
+              echo "### Build Metadata"
               echo
-            fi
-            if [ "${#debian_packages[@]}" -gt 0 ]; then
-              echo "### Debian / Ubuntu"
-              print_list "${debian_packages[@]}"
-              echo
-            fi
-            if [ "${#fedora_packages[@]}" -gt 0 ]; then
-              echo "### Fedora"
-              print_list "${fedora_packages[@]}"
+              print_list "${build_info[@]}" "${checksum_manifests[@]}"
               echo
             fi
             echo "## Verification"
             echo
-            echo "Each package has a \`.sha256\` sidecar, and every distro build also includes a checksum manifest plus build info."
-            if [ "${#build_info[@]}" -gt 0 ]; then
+            echo "Each package has a \`.sha256\` sidecar, and every distro build includes a checksum manifest plus build info."
+            if [ "${#checksum_manifests[@]}" -gt 0 ]; then
               echo
-              echo "Build info files:"
-              print_list "${build_info[@]}"
+              echo "After downloading the packages and manifests for your distro, verify them with:"
+              echo
+              echo '```bash'
+              for manifest in "${checksum_manifests[@]}"; do
+                printf 'sha256sum -c ./%s\n' "${manifest}"
+              done
+              echo '```'
+            fi
+            echo
+            echo "## ${change_heading}"
+            echo
+            if [ "${#change_lines[@]}" -gt 0 ]; then
+              printf '%s\n' "${change_lines[@]}"
+              if [ -n "${previous_tag}" ] && [ "${total_changes}" -gt "${#change_lines[@]}" ]; then
+                echo "- ...and $((total_changes - ${#change_lines[@]})) more commits."
+              fi
+            else
+              echo "- No source commits were found for this comparison."
+            fi
+            if [ -n "${previous_tag}" ]; then
+              echo
+              echo "[Compare ${previous_tag}...${RELEASE_TAG}](https://github.com/${GITHUB_REPOSITORY}/compare/${previous_tag}...${RELEASE_TAG})"
             fi
           } > release-notes.md
+
+          lifecycle_flags=()
+          if [ "${RELEASE_IS_PRERELEASE}" = true ]; then
+            lifecycle_flags+=(--prerelease)
+          else
+            lifecycle_flags+=(--latest)
+          fi
 
           if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${RELEASE_TAG}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --title "xyzkernel ${RELEASE_TAG}" \
+              --title "${RELEASE_TITLE}" \
               --notes-file release-notes.md \
-              --latest
+              "${lifecycle_flags[@]}"
             gh release upload "${RELEASE_TAG}" "${assets[@]}" \
               --repo "${GITHUB_REPOSITORY}" \
               --clobber
@@ -235,7 +441,7 @@ jobs:
             gh release create "${RELEASE_TAG}" "${assets[@]}" \
               --repo "${GITHUB_REPOSITORY}" \
               --target "${GITHUB_SHA}" \
-              --title "xyzkernel ${RELEASE_TAG}" \
+              --title "${RELEASE_TITLE}" \
               --notes-file release-notes.md \
-              --latest
+              "${lifecycle_flags[@]}"
           fi
